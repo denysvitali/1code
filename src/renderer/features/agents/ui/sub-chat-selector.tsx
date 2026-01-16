@@ -529,15 +529,15 @@ export function SubChatSelector({
                             : "hover:bg-muted/80 max-w-[150px]",
                         )}
                       >
-                        {/* Icon: loading spinner OR question icon OR mode icon with badge (hide when editing) */}
+                        {/* Icon: question icon (priority) OR loading spinner OR mode icon with badge (hide when editing) */}
                         {editingSubChatId !== subChat.id && (
                           <div className="flex-shrink-0 w-3.5 h-3.5 flex items-center justify-center relative">
-                            {isLoading ? (
-                              // Loading: show only spinner (replaces entire icon block)
-                              <IconSpinner className="w-3.5 h-3.5 text-muted-foreground" />
-                            ) : hasPendingQuestion ? (
-                              // Waiting for user answer: show question icon
+                            {hasPendingQuestion ? (
+                              // Waiting for user answer: show question icon (highest priority)
                               <QuestionIcon className="w-3.5 h-3.5 text-blue-500" />
+                            ) : isLoading ? (
+                              // Loading: show spinner
+                              <IconSpinner className="w-3.5 h-3.5 text-muted-foreground" />
                             ) : (
                               <>
                                 {/* Main mode icon */}
@@ -714,12 +714,12 @@ export function SubChatSelector({
 
               return (
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                  {/* Icon with badge */}
+                  {/* Icon with badge - question icon has priority */}
                   <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center relative">
-                    {isLoading ? (
-                      <IconSpinner className="w-4 h-4 text-muted-foreground" />
-                    ) : hasPendingQuestion ? (
+                    {hasPendingQuestion ? (
                       <QuestionIcon className="w-4 h-4 text-blue-500" />
+                    ) : isLoading ? (
+                      <IconSpinner className="w-4 h-4 text-muted-foreground" />
                     ) : mode === "plan" ? (
                       <PlanIcon className="w-4 h-4 text-muted-foreground" />
                     ) : (

@@ -13,6 +13,7 @@ import {
   selectedAgentChatIdAtom,
   subChatFilesAtom,
   justCreatedIdsAtom,
+  pendingUserQuestionsAtom,
 } from "../agents/atoms"
 import {
   selectedTeamIdAtom,
@@ -39,6 +40,7 @@ import {
   AgentIcon,
   IconOpenSidebar,
   ClockIcon,
+  QuestionIcon,
 } from "../../components/ui/icons"
 import {
   Tooltip,
@@ -120,6 +122,7 @@ export function AgentsSubChatsSidebar({
   const subChatUnseenChanges = useAtomValue(agentsSubChatUnseenChangesAtom)
   const setSubChatUnseenChanges = useSetAtom(agentsSubChatUnseenChangesAtom)
   const [justCreatedIds, setJustCreatedIds] = useAtom(justCreatedIdsAtom)
+  const pendingQuestions = useAtomValue(pendingUserQuestionsAtom)
   const [searchQuery, setSearchQuery] = useState("")
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [focusedChatIndex, setFocusedChatIndex] = useState<number>(-1)
@@ -768,19 +771,22 @@ export function AgentsSubChatsSidebar({
           const isLoading = loadingSubChats.has(subChat.id)
           const hasUnseen = subChatUnseenChanges.has(subChat.id)
           const mode = subChat.mode || "agent"
+          const hasPendingQuestion = pendingQuestions?.subChatId === subChat.id
 
           return (
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              {/* Icon with badge */}
+              {/* Icon with badge - question icon has priority */}
               <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center relative">
-                {isLoading ? (
+                {hasPendingQuestion ? (
+                  <QuestionIcon className="w-4 h-4 text-blue-500" />
+                ) : isLoading ? (
                   <IconSpinner className="w-4 h-4 text-muted-foreground" />
                 ) : mode === "plan" ? (
                   <PlanIcon className="w-4 h-4 text-muted-foreground" />
                 ) : (
                   <AgentIcon className="w-4 h-4 text-muted-foreground" />
                 )}
-                {hasUnseen && !isLoading && (
+                {hasUnseen && !isLoading && !hasPendingQuestion && (
                   <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-popover flex items-center justify-center">
                     <div className="w-1.5 h-1.5 rounded-full bg-[#307BD0]" />
                   </div>
@@ -1045,6 +1051,7 @@ export function AgentsSubChatsSidebar({
                           const mode = subChat.mode || "agent"
                           const isChecked = selectedSubChatIds.has(subChat.id)
                           const draftText = getDraftText(subChat.id)
+                          const hasPendingQuestion = pendingQuestions?.subChatId === subChat.id
                           const fileChanges = subChatFiles.get(subChat.id) || []
                           const stats =
                             fileChanges.length > 0
@@ -1128,7 +1135,7 @@ export function AgentsSubChatsSidebar({
                                           tabIndex={isMultiSelectMode ? 0 : -1}
                                         />
                                       </div>
-                                      {/* Mode icon - hidden in multi-select mode */}
+                                      {/* Mode icon or Question icon - hidden in multi-select mode */}
                                       <div
                                         className={cn(
                                           "transition-[opacity,transform] duration-150 ease-out",
@@ -1137,15 +1144,17 @@ export function AgentsSubChatsSidebar({
                                             : "opacity-100 scale-100",
                                         )}
                                       >
-                                        {mode === "plan" ? (
+                                        {hasPendingQuestion ? (
+                                          <QuestionIcon className="w-4 h-4 text-blue-500" />
+                                        ) : mode === "plan" ? (
                                           <PlanIcon className="w-4 h-4 text-muted-foreground" />
                                         ) : (
                                           <AgentIcon className="w-4 h-4 text-muted-foreground" />
                                         )}
                                       </div>
-                                      {/* Badge in bottom-right corner - hidden in multi-select mode */}
+                                      {/* Badge in bottom-right corner - hidden in multi-select mode and when pending question */}
                                       {(isSubChatLoading || hasUnseen) &&
-                                        !isMultiSelectMode && (
+                                        !isMultiSelectMode && !hasPendingQuestion && (
                                           <div
                                             className={cn(
                                               "absolute -bottom-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center",
@@ -1315,6 +1324,7 @@ export function AgentsSubChatsSidebar({
                           const mode = subChat.mode || "agent"
                           const isChecked = selectedSubChatIds.has(subChat.id)
                           const draftText = getDraftText(subChat.id)
+                          const hasPendingQuestion = pendingQuestions?.subChatId === subChat.id
                           const fileChanges = subChatFiles.get(subChat.id) || []
                           const stats =
                             fileChanges.length > 0
@@ -1398,7 +1408,7 @@ export function AgentsSubChatsSidebar({
                                           tabIndex={isMultiSelectMode ? 0 : -1}
                                         />
                                       </div>
-                                      {/* Mode icon - hidden in multi-select mode */}
+                                      {/* Mode icon or Question icon - hidden in multi-select mode */}
                                       <div
                                         className={cn(
                                           "transition-[opacity,transform] duration-150 ease-out",
@@ -1407,15 +1417,17 @@ export function AgentsSubChatsSidebar({
                                             : "opacity-100 scale-100",
                                         )}
                                       >
-                                        {mode === "plan" ? (
+                                        {hasPendingQuestion ? (
+                                          <QuestionIcon className="w-4 h-4 text-blue-500" />
+                                        ) : mode === "plan" ? (
                                           <PlanIcon className="w-4 h-4 text-muted-foreground" />
                                         ) : (
                                           <AgentIcon className="w-4 h-4 text-muted-foreground" />
                                         )}
                                       </div>
-                                      {/* Badge - hidden in multi-select mode */}
+                                      {/* Badge - hidden in multi-select mode and when pending question */}
                                       {(isSubChatLoading || hasUnseen) &&
-                                        !isMultiSelectMode && (
+                                        !isMultiSelectMode && !hasPendingQuestion && (
                                           <div
                                             className={cn(
                                               "absolute -bottom-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center",

@@ -63,10 +63,10 @@ export function SubChatContextMenu({
   return (
     <ContextMenuContent className="w-48">
       <ContextMenuItem onClick={() => onTogglePin(subChat.id)}>
-        {isPinned ? "Unpin agent" : "Pin agent"}
+        {isPinned ? "Unpin chat" : "Pin chat"}
       </ContextMenuItem>
       <ContextMenuItem onClick={() => onRename(subChat)}>
-        Rename agent
+        Rename chat
       </ContextMenuItem>
       <ContextMenuSeparator />
 
@@ -77,20 +77,20 @@ export function SubChatContextMenu({
             className="justify-between"
             disabled={isOnlyChat}
           >
-            Close tab
+            Close chat
             {!isOnlyChat && <Kbd>{closeTabShortcut}</Kbd>}
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => onCloseOtherTabs?.(subChat.id)}
             disabled={!canCloseOtherTabs}
           >
-            Close other tabs
+            Close other chats
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => onCloseTabsToRight?.(subChat.id, visualIndex)}
             disabled={!hasTabsToRight}
           >
-            Close tabs to the right
+            Close chats to the right
           </ContextMenuItem>
         </>
       ) : (
@@ -100,7 +100,7 @@ export function SubChatContextMenu({
             className="justify-between"
             disabled={isOnlyChat}
           >
-            Archive agent
+            Archive chat
             {!isOnlyChat && <Kbd>{closeTabShortcut}</Kbd>}
           </ContextMenuItem>
           <ContextMenuItem
@@ -110,13 +110,13 @@ export function SubChatContextMenu({
               currentIndex >= (totalCount || 0) - 1
             }
           >
-            Archive agents below
+            Archive chats below
           </ContextMenuItem>
           <ContextMenuItem
             onClick={() => onArchiveOthers(subChat.id)}
             disabled={isOnlyChat}
           >
-            Archive other agents
+            Archive other chats
           </ContextMenuItem>
         </>
       )}

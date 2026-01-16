@@ -6,7 +6,7 @@ interface AutoRenameParams {
   parentChatId: string
   userMessage: string
   isFirstSubChat: boolean
-  generateName: (userMessage: string) => Promise<{ name: string } | undefined>
+  generateName: (userMessage: string) => Promise<{ name: string }>
   renameSubChat: (input: { subChatId: string; name: string }) => Promise<void>
   renameChat: (input: { chatId: string; name: string }) => Promise<void>
   updateSubChatName: (subChatId: string, name: string) => void
@@ -34,8 +34,7 @@ export async function autoRenameAgentChat({
   try {
     // 1. Generate name from LLM via tRPC
     console.log("[auto-rename] Calling generateName...")
-    const result = await generateName(userMessage)
-    const name = result?.name
+    const { name } = await generateName(userMessage)
     console.log("[auto-rename] Generated name:", name)
 
     if (!name || name === "New Agent") {
