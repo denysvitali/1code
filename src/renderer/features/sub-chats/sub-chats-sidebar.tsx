@@ -14,6 +14,7 @@ import {
   selectAllSubChatsAtom,
   clearSubChatSelectionAtom,
   selectedSubChatsCountAtom,
+  pendingUserQuestionsAtom,
 } from "../../lib/atoms"
 import {
   useAgentSubChatStore,
@@ -26,6 +27,7 @@ import {
   PlanIcon,
   AgentIcon,
   ClockIcon,
+  QuestionIcon,
 } from "../../components/ui/icons"
 import {
   Tooltip,
@@ -81,6 +83,7 @@ export function SubChatsSidebar({
 
   const subChatUnseenChanges = useAtomValue(agentsSubChatUnseenChangesAtom)
   const setSubChatUnseenChanges = useSetAtom(agentsSubChatUnseenChangesAtom)
+  const pendingQuestions = useAtomValue(pendingUserQuestionsAtom)
   const [searchQuery, setSearchQuery] = useState("")
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [focusedChatIndex, setFocusedChatIndex] = useState<number>(-1)
@@ -593,6 +596,7 @@ export function SubChatsSidebar({
     const mode = subChat.mode || "agent"
     const isChecked = selectedSubChatIds.has(subChat.id)
     const draftText = getDraftText(subChat.id)
+    const hasPendingQuestion = pendingQuestions?.subChatId === subChat.id
 
     return (
       <ContextMenu key={subChat.id}>
@@ -636,7 +640,7 @@ export function SubChatsSidebar({
             <div className="flex items-start gap-2.5">
               {/* Icon/Checkbox container */}
               <div className="pt-0.5 flex-shrink-0 w-4 h-4 flex items-center justify-center relative">
-                {/* Mode icon */}
+                {/* Mode icon or Question icon */}
                 <div
                   className={cn(
                     "transition-[opacity,transform] duration-150 ease-out",
@@ -645,14 +649,16 @@ export function SubChatsSidebar({
                       : "opacity-100 scale-100",
                   )}
                 >
-                  {mode === "plan" ? (
+                  {hasPendingQuestion ? (
+                    <QuestionIcon className="w-4 h-4 text-blue-500" />
+                  ) : mode === "plan" ? (
                     <PlanIcon className="w-4 h-4 text-muted-foreground" />
                   ) : (
                     <AgentIcon className="w-4 h-4 text-muted-foreground" />
                   )}
                 </div>
-                {/* Badge */}
-                {(isSubChatLoading || hasUnseen) && !isMultiSelectMode && (
+                {/* Badge - don't show when pending question (icon already indicates status) */}
+                {(isSubChatLoading || hasUnseen) && !isMultiSelectMode && !hasPendingQuestion && (
                   <div
                     className={cn(
                       "absolute -bottom-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center",

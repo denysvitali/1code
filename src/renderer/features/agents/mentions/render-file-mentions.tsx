@@ -2,7 +2,7 @@
 
 import { useMemo } from "react"
 import { getFileIconByExtension } from "./agents-file-mention"
-import { FilesIcon, SkillIcon } from "../../../components/ui/icons"
+import { FilesIcon, SkillIcon, AgentIcon } from "../../../components/ui/icons"
 import { MENTION_PREFIXES } from "./agents-mentions-editor"
 
 // Custom folder icon matching design
@@ -29,19 +29,20 @@ interface ParsedMention {
   label: string
   path: string
   repository: string
-  type: "file" | "folder" | "skill"
+  type: "file" | "folder" | "skill" | "agent"
 }
 
 /**
- * Parse file/folder/skill mention ID into its components
- * Format: file:owner/repo:path/to/file.tsx or folder:owner/repo:path/to/folder or skill:skill-name
+ * Parse file/folder/skill/agent mention ID into its components
+ * Format: file:owner/repo:path/to/file.tsx or folder:owner/repo:path/to/folder or skill:skill-name or agent:agent-name
  */
 function parseMention(id: string): ParsedMention | null {
   const isFile = id.startsWith(MENTION_PREFIXES.FILE)
   const isFolder = id.startsWith(MENTION_PREFIXES.FOLDER)
   const isSkill = id.startsWith(MENTION_PREFIXES.SKILL)
+  const isAgent = id.startsWith(MENTION_PREFIXES.AGENT)
 
-  if (!isFile && !isFolder && !isSkill) return null
+  if (!isFile && !isFolder && !isSkill && !isAgent) return null
 
   // Handle skill mentions (simpler format: skill:name)
   if (isSkill) {
@@ -52,6 +53,18 @@ function parseMention(id: string): ParsedMention | null {
       path: "",
       repository: "",
       type: "skill",
+    }
+  }
+
+  // Handle agent mentions (simpler format: agent:name)
+  if (isAgent) {
+    const agentName = id.slice(MENTION_PREFIXES.AGENT.length)
+    return {
+      id,
+      label: agentName,
+      path: "",
+      repository: "",
+      type: "agent",
     }
   }
 
@@ -73,18 +86,22 @@ function parseMention(id: string): ParsedMention | null {
 }
 
 /**
- * Component to render a single file/folder/skill mention chip (matching canvas style)
+ * Component to render a single file/folder/skill/agent mention chip (matching canvas style)
  */
 function MentionChip({ mention }: { mention: ParsedMention }) {
   const Icon = mention.type === "skill"
     ? SkillIcon
-    : mention.type === "folder" 
-      ? FolderOpenIcon 
-      : (getFileIconByExtension(mention.label) ?? FilesIcon)
-  
-  const title = mention.type === "skill" 
+    : mention.type === "agent"
+      ? AgentIcon
+      : mention.type === "folder"
+        ? FolderOpenIcon
+        : (getFileIconByExtension(mention.label) ?? FilesIcon)
+
+  const title = mention.type === "skill"
     ? `Skill: ${mention.label}`
-    : `${mention.repository}:${mention.path}`
+    : mention.type === "agent"
+      ? `Agent: ${mention.label}`
+      : `${mention.repository}:${mention.path}`
   
   return (
     <span
@@ -198,8 +215,8 @@ export function extractFileMentions(text: string): ParsedMention[] {
 }
 
 /**
- * Check if text contains any file, folder, or skill mentions
+ * Check if text contains any file, folder, skill, or agent mentions
  */
 export function hasFileMentions(text: string): boolean {
-  return /@\[(file|folder|skill):[^\]]+\]/.test(text)
+  return /@\[(file|folder|skill|agent):[^\]]+\]/.test(text)
 }

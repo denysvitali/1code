@@ -2,6 +2,8 @@ import { observable } from "@trpc/server/observable"
 import { eq } from "drizzle-orm"
 import { app, safeStorage } from "electron"
 import path from "path"
+import * as os from "os"
+import * as fs from "fs/promises"
 import { z } from "zod"
 import {
   buildClaudeEnv,
@@ -13,6 +15,55 @@ import {
 } from "../../claude"
 import { chats, claudeCodeCredentials, getDatabase, subChats } from "../../db"
 import { publicProcedure, router } from "../index"
+import { buildAgentsOption } from "./agent-utils"
+
+/**
+ * Parse @[agent:name] and @[skill:name] mentions from prompt text
+ * Returns the cleaned prompt and lists of mentioned agents/skills
+ */
+function parseMentions(prompt: string): {
+  cleanedPrompt: string
+  agentMentions: string[]
+  skillMentions: string[]
+  fileMentions: string[]
+  folderMentions: string[]
+} {
+  const agentMentions: string[] = []
+  const skillMentions: string[] = []
+  const fileMentions: string[] = []
+  const folderMentions: string[] = []
+
+  // Match @[prefix:name] pattern
+  const mentionRegex = /@\[(file|folder|skill|agent):([^\]]+)\]/g
+  let match
+
+  while ((match = mentionRegex.exec(prompt)) !== null) {
+    const [, type, name] = match
+    switch (type) {
+      case "agent":
+        agentMentions.push(name)
+        break
+      case "skill":
+        skillMentions.push(name)
+        break
+      case "file":
+        fileMentions.push(name)
+        break
+      case "folder":
+        folderMentions.push(name)
+        break
+    }
+  }
+
+  // Clean agent/skill mentions from prompt (they will be added as context)
+  // Keep file/folder mentions as they are useful context
+  const cleanedPrompt = prompt
+    .replace(/@\[agent:[^\]]+\]/g, "")
+    .replace(/@\[skill:[^\]]+\]/g, "")
+    .trim()
+
+  return { cleanedPrompt, agentMentions, skillMentions, fileMentions, folderMentions }
+}
 
 /**
  * Decrypt token using Electron's safeStorage
@@ -235,9 +286,42 @@ export const claudeRouter = router({
             // Capture stderr from Claude process for debugging
             const stderrLines: string[] = []
 
+            // Parse mentions from prompt (agents, skills, files, folders)
+            const { cleanedPrompt, agentMentions, skillMentions } = parseMentions(input.prompt)
+
+            // Build agents option for SDK (proper registration via options.agents)
+            const agentsOption = await buildAgentsOption(agentMentions, input.cwd)
+
+            // Log if agents were mentioned
+            if (agentMentions.length > 0) {
+              console.log(`[claude] Registering agents via SDK:`, Object.keys(agentsOption))
+            }
+
+            // Log if skills were mentioned
+            if (skillMentions.length > 0) {
+              console.log(`[claude] Skills mentioned:`, skillMentions)
+            }
+
+            // Build final prompt with skill instructions if needed
+            let finalPrompt = cleanedPrompt
+
+            // Handle empty prompt when only mentions are present
+            if (!finalPrompt.trim()) {
+              if (agentMentions.length > 0 && skillMentions.length > 0) {
+                finalPrompt = `Use the ${agentMentions.join(", ")} agent(s) and invoke the "${skillMentions.join('", "')}" skill(s) using the Skill tool for this task.`
+              } else if (agentMentions.length > 0) {
+                finalPrompt = `Use the ${agentMentions.join(", ")} agent(s) for this task.`
+              } else if (skillMentions.length > 0) {
+                finalPrompt = `Invoke the "${skillMentions.join('", "')}" skill(s) using the Skill tool for this task.`
+              }
+            } else if (skillMentions.length > 0) {
+              // Append skill instruction to existing prompt
+              finalPrompt = `${finalPrompt}\n\nUse the "${skillMentions.join('", "')}" skill(s) for this task.`
+            }
+
             // Build prompt: if there are images, create an AsyncIterable<SDKUserMessage>
             // Otherwise use simple string prompt
-            let prompt: string | AsyncIterable<any> = input.prompt
+            let prompt: string | AsyncIterable<any> = finalPrompt
 
             if (input.images && input.images.length > 0) {
               // Create message content array with images first, then text
@@ -253,10 +337,10 @@ export const claudeRouter = router({
               ]
 
               // Add text if present
-              if (input.prompt.trim()) {
+              if (finalPrompt.trim()) {
                 messageContent.push({
                   type: "text" as const,
-                  text: input.prompt,
+                  text: finalPrompt,
                 })
               }
 
@@ -295,6 +379,44 @@ export const claudeRouter = router({
               input.subChatId
             )
 
+            // Ensure isolated config dir exists and symlink skills/agents from ~/.claude/
+            // This is needed because SDK looks for skills at $CLAUDE_CONFIG_DIR/skills/
+            try {
+              await fs.mkdir(isolatedConfigDir, { recursive: true })
+
+              const homeClaudeDir = path.join(os.homedir(), ".claude")
+              const skillsSource = path.join(homeClaudeDir, "skills")
+              const skillsTarget = path.join(isolatedConfigDir, "skills")
+              const agentsSource = path.join(homeClaudeDir, "agents")
+              const agentsTarget = path.join(isolatedConfigDir, "agents")
+
+              // Symlink skills directory if source exists and target doesn't
+              try {
+                const skillsSourceExists = await fs.stat(skillsSource).then(() => true).catch(() => false)
+                const skillsTargetExists = await fs.lstat(skillsTarget).then(() => true).catch(() => false)
+                if (skillsSourceExists && !skillsTargetExists) {
+                  await fs.symlink(skillsSource, skillsTarget, "dir")
+                  console.log(`[claude] Symlinked skills: ${skillsTarget} -> ${skillsSource}`)
+                }
+              } catch (symlinkErr) {
+                // Ignore symlink errors (might already exist or permission issues)
+              }
+
+              // Symlink agents directory if source exists and target doesn't
+              try {
+                const agentsSourceExists = await fs.stat(agentsSource).then(() => true).catch(() => false)
+                const agentsTargetExists = await fs.lstat(agentsTarget).then(() => true).catch(() => false)
+                if (agentsSourceExists && !agentsTargetExists) {
+                  await fs.symlink(agentsSource, agentsTarget, "dir")
+                  console.log(`[claude] Symlinked agents: ${agentsTarget} -> ${agentsSource}`)
+                }
+              } catch (symlinkErr) {
+                // Ignore symlink errors (might already exist or permission issues)
+              }
+            } catch (mkdirErr) {
+              console.error(`[claude] Failed to setup isolated config dir:`, mkdirErr)
+            }
+
             // Build final env - only add OAuth token if we have one
             const finalEnv = {
               ...claudeEnv,
@@ -317,8 +439,9 @@ export const claudeRouter = router({
                 systemPrompt: {
                   type: "preset" as const,
                   preset: "claude_code" as const,
-                  append: " ",
                 },
+                // Register mentioned agents with SDK via options.agents
+                ...(Object.keys(agentsOption).length > 0 && { agents: agentsOption }),
                 env: finalEnv,
                 permissionMode:
                   input.mode === "plan"
@@ -370,12 +493,43 @@ export const claudeRouter = router({
                       })
                     })
 
+                    // Find the tool part in accumulated parts
+                    const askToolPart = parts.find(
+                      (p) => p.toolCallId === toolUseID && p.type === "tool-AskUserQuestion"
+                    )
+
                     if (!response.approved) {
+                      // Update the tool part with error result for skipped/denied
+                      const errorMessage = response.message || "Skipped"
+                      if (askToolPart) {
+                        askToolPart.result = errorMessage
+                        askToolPart.state = "result"
+                      }
+                      // Emit result to frontend so it updates in real-time
+                      safeEmit({
+                        type: "ask-user-question-result",
+                        toolUseId: toolUseID,
+                        result: errorMessage,
+                      } as UIMessageChunk)
                       return {
                         behavior: "deny",
-                        message: response.message || "Skipped",
+                        message: errorMessage,
                       }
                     }
+
+                    // Update the tool part with answers result for approved
+                    const answers = (response.updatedInput as any)?.answers
+                    const answerResult = { answers }
+                    if (askToolPart) {
+                      askToolPart.result = answerResult
+                      askToolPart.state = "result"
+                    }
+                    // Emit result to frontend so it updates in real-time
+                    safeEmit({
+                      type: "ask-user-question-result",
+                      toolUseId: toolUseID,
+                      result: answerResult,
+                    } as UIMessageChunk)
                     return {
                       behavior: "allow",
                       updatedInput: response.updatedInput,
@@ -545,9 +699,6 @@ export const claudeRouter = router({
                       })
                       break
                     case "tool-output-available":
-                      // DEBUG: Log all tool outputs
-                      console.log(`[SD] M:TOOL_OUTPUT sub=${subId} callId=${chunk.toolCallId} mode=${input.mode}`)
-
                       const toolPart = parts.find(
                         (p) =>
                           p.type?.startsWith("tool-") &&

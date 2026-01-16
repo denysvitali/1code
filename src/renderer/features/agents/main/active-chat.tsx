@@ -971,6 +971,11 @@ function ChatViewInner({
   const [mentionSearchText, setMentionSearchText] = useState("")
   const [mentionPosition, setMentionPosition] = useState({ top: 0, left: 0 })
 
+  // Mention dropdown subpage navigation state
+  const [showingFilesList, setShowingFilesList] = useState(false)
+  const [showingSkillsList, setShowingSkillsList] = useState(false)
+  const [showingAgentsList, setShowingAgentsList] = useState(false)
+
   // Slash command dropdown state
   const [showSlashDropdown, setShowSlashDropdown] = useState(false)
   const [slashSearchText, setSlashSearchText] = useState("")
@@ -1168,6 +1173,47 @@ function ChatViewInner({
     [messages],
   )
 
+  // Track previous streaming state to detect stream stop
+  const prevIsStreamingRef = useRef(isStreaming)
+  // Track if we recently stopped streaming (to prevent sync effect from restoring)
+  const recentlyStoppedStreamRef = useRef(false)
+
+  // Clear pending questions when streaming is aborted
+  // This effect runs when isStreaming transitions from true to false
+  useEffect(() => {
+    const wasStreaming = prevIsStreamingRef.current
+    prevIsStreamingRef.current = isStreaming
+
+    // Detect streaming stop transition
+    if (wasStreaming && !isStreaming) {
+      // Mark that we recently stopped streaming
+      recentlyStoppedStreamRef.current = true
+      // Clear the flag after a delay
+      const flagTimeout = setTimeout(() => {
+        recentlyStoppedStreamRef.current = false
+      }, 500)
+
+      // Streaming just stopped - if there's a pending question for this chat,
+      // clear it after a brief delay (backend already handled the abort)
+      if (pendingQuestions?.subChatId === subChatId) {
+        const timeout = setTimeout(() => {
+          // Re-check if still showing the same question (might have been cleared by other means)
+          setPendingQuestions((current) => {
+            if (current?.subChatId === subChatId) {
+              return null
+            }
+            return current
+          })
+        }, 150) // Small delay to allow for race conditions with transport chunks
+        return () => {
+          clearTimeout(timeout)
+          clearTimeout(flagTimeout)
+        }
+      }
+      return () => clearTimeout(flagTimeout)
+    }
+  }, [isStreaming, subChatId, pendingQuestions?.subChatId, pendingQuestions?.toolUseId, setPendingQuestions])
+
   // Sync pending questions with messages state
   // This handles: 1) restoring on chat switch, 2) clearing when question is answered/timed out
   useEffect(() => {
@@ -1180,6 +1226,7 @@ function ChatViewInner({
         part.state !== "result" &&
         part.input?.questions,
     ) as any | undefined
+
 
     // If streaming and we already have a pending question for this chat, keep it
     // (transport will manage it via chunks)
@@ -1202,18 +1249,17 @@ function ChatViewInner({
       return
     }
 
-    // Not streaming - restore or clear based on messages
+    // Not streaming - DON'T restore pending questions from messages
+    // If stream is not active, the question is either:
+    // 1. Already answered (state would be "output-available")
+    // 2. Interrupted/aborted (should not show dialog)
+    // 3. Timed out (should not show dialog)
+    // We only show the question dialog during active streaming when
+    // the backend is waiting for user response.
     if (pendingQuestionPart) {
-      // Found pending question - set it (or update if different)
-      if (
-        pendingQuestions?.subChatId !== subChatId ||
-        pendingQuestions?.toolUseId !== pendingQuestionPart.toolCallId
-      ) {
-        setPendingQuestions({
-          subChatId,
-          toolUseId: pendingQuestionPart.toolCallId,
-          questions: pendingQuestionPart.input.questions,
-        })
+      // Don't restore - if there's an existing pending question for this chat, clear it
+      if (pendingQuestions?.subChatId === subChatId) {
+        setPendingQuestions(null)
       }
     } else {
       // No pending question - clear if belongs to this sub-chat
@@ -1240,12 +1286,22 @@ function ChatViewInner({
   // Handle skipping questions
   const handleQuestionsSkip = useCallback(async () => {
     if (!pendingQuestions) return
-    await trpcClient.claude.respondToolApproval.mutate({
-      toolUseId: pendingQuestions.toolUseId,
-      approved: false,
-      message: QUESTIONS_SKIPPED_MESSAGE,
-    })
+    const toolUseId = pendingQuestions.toolUseId
+
+    // Clear UI immediately - don't wait for backend
+    // This ensures dialog closes even if stream was already aborted
     setPendingQuestions(null)
+
+    // Try to notify backend (may fail if already aborted - that's ok)
+    try {
+      await trpcClient.claude.respondToolApproval.mutate({
+        toolUseId,
+        approved: false,
+        message: QUESTIONS_SKIPPED_MESSAGE,
+      })
+    } catch {
+      // Stream likely already aborted - ignore
+    }
   }, [pendingQuestions, setPendingQuestions])
 
   // Watch for pending auth retry message (after successful OAuth flow)
@@ -1686,8 +1742,29 @@ function ChatViewInner({
   }
 
   const handleMentionSelect = useCallback((mention: FileMentionOption) => {
+    // Category navigation - enter subpage instead of inserting mention
+    if (mention.type === "category") {
+      if (mention.id === "files") {
+        setShowingFilesList(true)
+        return
+      }
+      if (mention.id === "skills") {
+        setShowingSkillsList(true)
+        return
+      }
+      if (mention.id === "agents") {
+        setShowingAgentsList(true)
+        return
+      }
+    }
+
+    // Otherwise: insert mention as normal
     editorRef.current?.insertMention(mention)
     setShowMentionDropdown(false)
+    // Reset subpage state
+    setShowingFilesList(false)
+    setShowingSkillsList(false)
+    setShowingAgentsList(false)
   }, [])
 
   // Slash command handlers
@@ -2363,6 +2440,8 @@ function ChatViewInner({
                             }
                             state={isPending ? "call" : "result"}
                             isError={isError}
+                            isStreaming={isStreaming && isLastMessage}
+                            toolCallId={part.toolCallId}
                           />
                         )
                       }
@@ -2675,7 +2754,13 @@ function ChatViewInner({
                         setShowMentionDropdown(true)
                       }
                     }}
-                    onCloseTrigger={() => setShowMentionDropdown(false)}
+                    onCloseTrigger={() => {
+                      setShowMentionDropdown(false)
+                      // Reset subpage state when closing
+                      setShowingFilesList(false)
+                      setShowingSkillsList(false)
+                      setShowingAgentsList(false)
+                    }}
                     onSlashTrigger={handleSlashTrigger}
                     onCloseSlashTrigger={handleCloseSlashTrigger}
                     onContentChange={setHasContent}
@@ -2995,7 +3080,13 @@ function ChatViewInner({
             showMentionDropdown &&
             (!!projectPath || !!repository || !!sandboxId)
           }
-          onClose={() => setShowMentionDropdown(false)}
+          onClose={() => {
+            setShowMentionDropdown(false)
+            // Reset subpage state when closing
+            setShowingFilesList(false)
+            setShowingSkillsList(false)
+            setShowingAgentsList(false)
+          }}
           onSelect={handleMentionSelect}
           searchText={mentionSearchText}
           position={mentionPosition}
@@ -3004,6 +3095,10 @@ function ChatViewInner({
           sandboxId={sandboxId}
           projectPath={projectPath}
           changedFiles={changedFilesForSubChat}
+          // Subpage navigation state
+          showingFilesList={showingFilesList}
+          showingSkillsList={showingSkillsList}
+          showingAgentsList={showingAgentsList}
         />
 
         {/* Slash command dropdown */}

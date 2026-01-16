@@ -1,9 +1,10 @@
 "use client"
 
 import { memo } from "react"
+import { useAtomValue } from "jotai"
 import { TextShimmer } from "../../../components/ui/text-shimmer"
 import { QuestionIcon } from "../../../components/ui/icons"
-import { QUESTIONS_SKIPPED_MESSAGE, QUESTIONS_TIMED_OUT_MESSAGE } from "../atoms"
+import { QUESTIONS_SKIPPED_MESSAGE, QUESTIONS_TIMED_OUT_MESSAGE, askUserQuestionResultsAtom, pendingUserQuestionsAtom } from "../atoms"
 
 interface AgentAskUserQuestionToolProps {
   input: {
@@ -23,6 +24,8 @@ interface AgentAskUserQuestionToolProps {
   errorText?: string
   state: "call" | "result"
   isError?: boolean
+  isStreaming?: boolean // Whether the message is currently streaming
+  toolCallId?: string // Tool call ID for looking up real-time results
 }
 
 export const AgentAskUserQuestionTool = memo(function AgentAskUserQuestionTool({
@@ -31,18 +34,31 @@ export const AgentAskUserQuestionTool = memo(function AgentAskUserQuestionTool({
   errorText,
   state,
   isError,
+  isStreaming,
+  toolCallId,
 }: AgentAskUserQuestionToolProps) {
   const questions = input?.questions ?? []
   const questionCount = questions.length
 
+  // Get real-time results from atom (for immediate updates before DB sync)
+  const resultsMap = useAtomValue(askUserQuestionResultsAtom)
+  const realtimeResult = toolCallId ? resultsMap.get(toolCallId) : undefined
+
+  // Check if the question dialog is currently shown for this tool
+  const pendingQuestions = useAtomValue(pendingUserQuestionsAtom)
+  const isDialogShown = pendingQuestions?.toolUseId === toolCallId
+
+  // Use realtime result if available, otherwise fall back to prop
+  const effectiveResult = realtimeResult ?? result
+
   // For errors, SDK stores errorText separately - use it to detect skip/timeout
   const effectiveErrorText =
-    errorText || (typeof result === "string" ? result : undefined)
+    errorText || (typeof effectiveResult === "string" ? effectiveResult : undefined)
 
   // Extract answers for display
   const answers =
-    result && typeof result === "object" && "answers" in result
-      ? result.answers
+    effectiveResult && typeof effectiveResult === "object" && "answers" in effectiveResult
+      ? (effectiveResult as { answers?: Record<string, string> }).answers
       : null
 
   // Determine status
@@ -51,12 +67,14 @@ export const AgentAskUserQuestionTool = memo(function AgentAskUserQuestionTool({
   const isCompleted =
     state === "result" && answers && !isSkipped && !isTimedOut && !isError
 
-  // Show loading state if no questions yet
-  if (questionCount === 0 && state === "call") {
+  // Show loading state if:
+  // 1. No questions yet (still streaming input)
+  // 2. Streaming but dialog not yet shown (waiting for ask-user-question chunk)
+  if (state === "call" && (questionCount === 0 || (isStreaming && !isDialogShown))) {
     return (
       <div className="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
         <TextShimmer className="text-xs" duration={1.5}>
-          Generating questions...
+          Asking question...
         </TextShimmer>
       </div>
     )
@@ -118,11 +136,39 @@ export const AgentAskUserQuestionTool = memo(function AgentAskUserQuestionTool({
 
   // Show pending state
   const firstQuestion = questions[0]?.header || questions[0]?.question
+
+  // If streaming THIS message, show "Waiting for response..."
+  // isStreaming is true only when global streaming is active AND this is the last message
+  if (isStreaming) {
+    return (
+      <div className="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
+        <span>{firstQuestion || "Question"}</span>
+        <span className="text-muted-foreground/50">•</span>
+        <span>Waiting for response...</span>
+      </div>
+    )
+  }
+
+  // If we have a realtime result but it hasn't synced to the message yet,
+  // show "Submitting..." (user just answered, waiting for sync)
+  // Note: realtimeResult is set immediately when user answers via ask-user-question-result chunk
+  // If there's no realtimeResult and no answers, the stream was interrupted without an answer
+  if (state === "result" && realtimeResult && !answers && !isError && !isSkipped && !isTimedOut) {
+    return (
+      <div className="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
+        <span>{firstQuestion || "Question"}</span>
+        <span className="text-muted-foreground/50">•</span>
+        <span>Submitting...</span>
+      </div>
+    )
+  }
+
+  // Not streaming and state is "call" - it was truly interrupted
   return (
     <div className="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
       <span>{firstQuestion || "Question"}</span>
       <span className="text-muted-foreground/50">•</span>
-      <span>Waiting for response...</span>
+      <span>Interrupted</span>
     </div>
   )
 })

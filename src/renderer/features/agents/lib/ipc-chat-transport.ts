@@ -8,6 +8,7 @@ import {
 import { appStore } from "../../../lib/jotai-store"
 import { trpcClient } from "../../../lib/trpc"
 import {
+  askUserQuestionResultsAtom,
   lastSelectedModelIdAtom,
   MODEL_ID_MAP,
   pendingAuthRetryMessageAtom,
@@ -158,22 +159,8 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
               chunkCount++
               lastChunkType = chunk.type
 
-              // Debug: log all chunks when there's a pending question
-              const currentPending = appStore.get(pendingUserQuestionsAtom)
-              if (currentPending || chunk.type === "ask-user-question") {
-                console.log("[PendingQ] Transport chunk:", {
-                  type: chunk.type,
-                  hasPending: !!currentPending,
-                  chunkCount,
-                })
-              }
-
               // Handle AskUserQuestion - show question UI
               if (chunk.type === "ask-user-question") {
-                console.log("[PendingQ] Transport: Setting pending question", {
-                  subChatId: this.config.subChatId,
-                  toolUseId: chunk.toolUseId,
-                })
                 appStore.set(pendingUserQuestionsAtom, {
                   subChatId: this.config.subChatId,
                   toolUseId: chunk.toolUseId,
@@ -185,22 +172,32 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
               if (chunk.type === "ask-user-question-timeout") {
                 const pending = appStore.get(pendingUserQuestionsAtom)
                 if (pending && pending.toolUseId === chunk.toolUseId) {
-                  console.log("[PendingQ] Transport: Clearing timed out question", {
-                    toolUseId: chunk.toolUseId,
-                  })
                   appStore.set(pendingUserQuestionsAtom, null)
                 }
               }
 
-              // Clear pending questions on ANY other chunk type (agent moved on)
-              // Only clear if the pending question belongs to THIS sub-chat
-              if (chunk.type !== "ask-user-question" && chunk.type !== "ask-user-question-timeout") {
+              // Handle AskUserQuestion result - store for real-time updates
+              if (chunk.type === "ask-user-question-result") {
+                const currentResults = appStore.get(askUserQuestionResultsAtom)
+                const newResults = new Map(currentResults)
+                newResults.set(chunk.toolUseId, chunk.result)
+                appStore.set(askUserQuestionResultsAtom, newResults)
+              }
+
+              // Clear pending questions ONLY when agent has moved on
+              // Don't clear on tool-input-* chunks (still building the question input)
+              // Clear when we get tool-output-* (answer received) or text-delta (agent moved on)
+              const shouldClearOnChunk =
+                chunk.type !== "ask-user-question" &&
+                chunk.type !== "ask-user-question-timeout" &&
+                chunk.type !== "ask-user-question-result" &&
+                !chunk.type.startsWith("tool-input") && // Don't clear while input is being built
+                chunk.type !== "start" &&
+                chunk.type !== "start-step"
+
+              if (shouldClearOnChunk) {
                 const pending = appStore.get(pendingUserQuestionsAtom)
                 if (pending && pending.subChatId === this.config.subChatId) {
-                  console.log("[PendingQ] Transport: Clearing pending question", {
-                    chunkType: chunk.type,
-                    pendingToolUseId: pending.toolUseId,
-                  })
                   appStore.set(pendingUserQuestionsAtom, null)
                 }
               }
@@ -303,15 +300,9 @@ export class IPCChatTransport implements ChatTransport<UIMessage> {
             },
             onComplete: () => {
               console.log(`[SD] R:COMPLETE sub=${subId} n=${chunkCount} last=${lastChunkType}`)
-              // Fallback: clear any pending questions when stream completes
-              // This handles edge cases where timeout chunk wasn't received
-              const pending = appStore.get(pendingUserQuestionsAtom)
-              if (pending && pending.subChatId === this.config.subChatId) {
-                console.log("[PendingQ] Transport: Clearing pending question on stream complete (fallback)", {
-                  pendingToolUseId: pending.toolUseId,
-                })
-                appStore.set(pendingUserQuestionsAtom, null)
-              }
+              // Note: Don't clear pending questions here - let active-chat.tsx handle it
+              // via the stream stop detection effect. Clearing here causes race conditions
+              // where sync effect immediately restores from messages.
               try {
                 controller.close()
               } catch {

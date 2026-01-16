@@ -6,6 +6,7 @@ import {
   loadingSubChatsAtom,
   agentsSubChatUnseenChangesAtom,
   agentsSubChatsSidebarModeAtom,
+  pendingUserQuestionsAtom,
 } from "../atoms"
 import { X, Plus, AlignJustify, Play } from "lucide-react"
 import {
@@ -16,6 +17,7 @@ import {
   PinFilledIcon,
   DiffIcon,
   ClockIcon,
+  QuestionIcon,
 } from "../../../components/ui/icons"
 import { Button } from "../../../components/ui/button"
 import { cn } from "../../../lib/utils"
@@ -89,6 +91,7 @@ export function SubChatSelector({
   const [subChatsSidebarMode, setSubChatsSidebarMode] = useAtom(
     agentsSubChatsSidebarModeAtom,
   )
+  const pendingQuestions = useAtomValue(pendingUserQuestionsAtom)
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const tabsContainerRef = useRef<HTMLDivElement>(null)
@@ -487,6 +490,8 @@ export function SubChatSelector({
                 const isPinned = pinnedSubChatIds.includes(subChat.id)
                 // Get mode from sub-chat itself (defaults to "agent")
                 const mode = subChat.mode || "agent"
+                // Check if this chat is waiting for user answer
+                const hasPendingQuestion = pendingQuestions?.subChatId === subChat.id
 
                 return (
                   <ContextMenu key={subChat.id}>
@@ -524,12 +529,15 @@ export function SubChatSelector({
                             : "hover:bg-muted/80 max-w-[150px]",
                         )}
                       >
-                        {/* Icon: loading spinner OR mode icon with badge (hide when editing) */}
+                        {/* Icon: loading spinner OR question icon OR mode icon with badge (hide when editing) */}
                         {editingSubChatId !== subChat.id && (
                           <div className="flex-shrink-0 w-3.5 h-3.5 flex items-center justify-center relative">
                             {isLoading ? (
                               // Loading: show only spinner (replaces entire icon block)
                               <IconSpinner className="w-3.5 h-3.5 text-muted-foreground" />
+                            ) : hasPendingQuestion ? (
+                              // Waiting for user answer: show question icon
+                              <QuestionIcon className="w-3.5 h-3.5 text-blue-500" />
                             ) : (
                               <>
                                 {/* Main mode icon */}
@@ -702,6 +710,7 @@ export function SubChatSelector({
               const isLoading = loadingSubChats.has(subChat.id)
               const hasUnseen = subChatUnseenChanges.has(subChat.id)
               const mode = subChat.mode || "agent"
+              const hasPendingQuestion = pendingQuestions?.subChatId === subChat.id
 
               return (
                 <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -709,12 +718,14 @@ export function SubChatSelector({
                   <div className="flex-shrink-0 w-4 h-4 flex items-center justify-center relative">
                     {isLoading ? (
                       <IconSpinner className="w-4 h-4 text-muted-foreground" />
+                    ) : hasPendingQuestion ? (
+                      <QuestionIcon className="w-4 h-4 text-blue-500" />
                     ) : mode === "plan" ? (
                       <PlanIcon className="w-4 h-4 text-muted-foreground" />
                     ) : (
                       <AgentIcon className="w-4 h-4 text-muted-foreground" />
                     )}
-                    {hasUnseen && !isLoading && (
+                    {hasUnseen && !isLoading && !hasPendingQuestion && (
                       <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-popover flex items-center justify-center">
                         <div className="w-1.5 h-1.5 rounded-full bg-[#307BD0]" />
                       </div>

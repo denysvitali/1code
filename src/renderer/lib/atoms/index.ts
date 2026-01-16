@@ -56,6 +56,9 @@ export {
   // Todos
   currentTodosAtomFamily,
 
+  // AskUserQuestion
+  pendingUserQuestionsAtom,
+
   // Types
   type SavedRepo,
   type SelectedProject,
@@ -160,7 +163,7 @@ export const clearSubChatSelectionAtom = atom(null, (_get, set) => {
 // ============================================
 
 // Settings dialog
-export type SettingsTab = "profile" | "appearance" | "preferences" | "debug"
+export type SettingsTab = "profile" | "appearance" | "preferences" | "skills" | "agents" | "debug"
 export const agentsSettingsDialogActiveTabAtom = atom<SettingsTab>("profile")
 export const agentsSettingsDialogOpenAtom = atom<boolean>(false)
 

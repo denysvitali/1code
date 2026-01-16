@@ -4,20 +4,19 @@ import { createPortal } from "react-dom"
 import { AnimatePresence, motion } from "motion/react"
 import { X, Bug, ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "../../lib/utils"
-import { agentsSettingsDialogActiveTabAtom } from "../../lib/atoms"
+import { agentsSettingsDialogActiveTabAtom, type SettingsTab } from "../../lib/atoms"
 import {
   ProfileIconFilled,
   EyeOpenFilledIcon,
   SlidersFilledIcon,
 } from "../../icons"
-import { SkillIcon } from "../ui/icons"
+import { SkillIcon, AgentIcon } from "../ui/icons"
 import { AgentsAppearanceTab } from "./settings-tabs/agents-appearance-tab"
 import { AgentsProfileTab } from "./settings-tabs/agents-profile-tab"
 import { AgentsPreferencesTab } from "./settings-tabs/agents-preferences-tab"
 import { AgentsDebugTab } from "./settings-tabs/agents-debug-tab"
 import { AgentsSkillsTab } from "./settings-tabs/agents-skills-tab"
-
-type SettingsTab = "profile" | "appearance" | "preferences" | "skills" | "debug"
+import { AgentsCustomAgentsTab } from "./settings-tabs/agents-custom-agents-tab"
 
 // Hook to detect narrow screen
 function useIsNarrowScreen(): boolean {
@@ -67,7 +66,14 @@ const ALL_TABS = [
     id: "skills" as SettingsTab,
     label: "Skills",
     icon: SkillIcon,
-    description: "Custom Claude sub-agents",
+    description: "Custom Claude skills",
+    beta: true,
+  },
+  {
+    id: "agents" as SettingsTab,
+    label: "Custom Agents",
+    icon: AgentIcon,
+    description: "Manage custom Claude agents",
     beta: true,
   },
   // Debug tab - always shown in desktop for development
@@ -195,6 +201,8 @@ export function AgentsSettingsDialog({
         return <AgentsPreferencesTab />
       case "skills":
         return <AgentsSkillsTab />
+      case "agents":
+        return <AgentsCustomAgentsTab />
       case "debug":
         return isDevelopment ? <AgentsDebugTab /> : null
       default:

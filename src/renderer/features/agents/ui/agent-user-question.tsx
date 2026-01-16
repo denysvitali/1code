@@ -147,6 +147,7 @@ export const AgentUserQuestion = memo(function AgentUserQuestion({
     questions,
     currentQuestion?.question,
     isSubmitting,
+    pendingQuestions.toolUseId,
   ])
 
   const handleSkipWithGuard = useCallback(() => {

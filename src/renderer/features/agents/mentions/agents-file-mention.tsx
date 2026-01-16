@@ -22,7 +22,15 @@ import {
   FilesIcon,
   IconSpinner,
   SkillIcon,
+  AgentIcon,
 } from "../../../components/ui/icons"
+import { ChevronRight } from "lucide-react"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../../../components/ui/tooltip"
 
 // Custom folder icon matching design
 function FolderOpenIcon({ className }: { className?: string }) {
@@ -95,7 +103,18 @@ interface AgentsFileMentionProps {
   branch?: string // For fetching files from specific branch via GitHub API
   projectPath?: string // For fetching files from local project directory (desktop)
   changedFiles?: ChangedFile[] // Files changed in current sub-chat (shown at top)
+  // Subpage navigation state
+  showingFilesList?: boolean
+  showingSkillsList?: boolean
+  showingAgentsList?: boolean
 }
+
+// Category navigation options (shown on root view)
+const CATEGORY_OPTIONS: FileMentionOption[] = [
+  { id: "files", label: "Files & Folders", type: "category", path: "", repository: "" },
+  { id: "skills", label: "Skills", type: "category", path: "", repository: "" },
+  { id: "agents", label: "Agents", type: "category", path: "", repository: "" },
+]
 
 // Known file extensions with icons
 const KNOWN_FILE_ICON_EXTENSIONS = new Set([
@@ -290,12 +309,16 @@ export function getFileIconByExtension(
 }
 
 // Create SVG icon element in DOM based on file extension or type
-export function createFileIconElement(filename: string, type?: "file" | "folder" | "skill"): SVGSVGElement {
+export function createFileIconElement(filename: string, type?: "file" | "folder" | "skill" | "agent" | "category"): SVGSVGElement {
   const IconComponent = type === "skill"
     ? SkillIcon
-    : type === "folder" 
-      ? FolderOpenIcon 
+    : type === "agent"
+      ? AgentIcon
+    : type === "folder"
+      ? FolderOpenIcon
       : (getFileIconByExtension(filename) ?? FilesIcon)
+  // Note: "category" type will use the default file icon based on filename, which is fine since
+  // categories won't be inserted as mentions in the editor (they navigate to subpages)
 
   // Create a temporary container
   const container = document.createElement("div")
@@ -376,12 +399,39 @@ function SkillIconWrapper({ className }: { className?: string }) {
   return <SkillIcon className={className} />
 }
 
+function AgentIconWrapper({ className }: { className?: string }) {
+  return <AgentIcon className={className} />
+}
+
+// Category icon component
+function CategoryIcon({ className, categoryId }: { className?: string; categoryId: string }) {
+  if (categoryId === "files") {
+    return <FilesIcon className={className} />
+  }
+  if (categoryId === "skills") {
+    return <SkillIcon className={className} />
+  }
+  if (categoryId === "agents") {
+    return <AgentIcon className={className} />
+  }
+  return <FilesIcon className={className} />
+}
+
 /**
- * Get icon component for a file, folder, or skill option
+ * Get icon component for a file, folder, skill, agent, or category option
  */
-export function getOptionIcon(option: { label: string; type?: "file" | "folder" | "skill" }) {
+export function getOptionIcon(option: { id?: string; label: string; type?: "file" | "folder" | "skill" | "agent" | "category" }) {
+  if (option.type === "category") {
+    // Return a wrapper component for categories
+    return function CategoryIconWrapper({ className }: { className?: string }) {
+      return <CategoryIcon className={className} categoryId={option.id || ""} />
+    }
+  }
   if (option.type === "skill") {
     return SkillIconWrapper
+  }
+  if (option.type === "agent") {
+    return AgentIconWrapper
   }
   if (option.type === "folder") {
     return FolderIcon
@@ -474,6 +524,49 @@ function sortFilesByRelevance<T extends { label: string; path?: string }>(
   })
 }
 
+/**
+ * Render tooltip content for a mention option
+ * Skills/agents show description, tools, model info
+ * Files/folders show path
+ */
+function renderTooltipContent(option: FileMentionOption) {
+  if (option.type === "folder") {
+    return renderFolderTree(option.path)
+  }
+
+  if (option.type === "skill" || option.type === "agent") {
+    return (
+      <div className="flex flex-col gap-1.5 w-full overflow-hidden">
+        {option.description && (
+          <p className="text-xs text-muted-foreground break-words">
+            {option.description}
+          </p>
+        )}
+        {option.model && (
+          <div className="text-xs text-muted-foreground">
+            Model: {option.model}
+          </div>
+        )}
+        {option.tools && option.tools.length > 0 && (
+          <div className="text-xs text-muted-foreground break-words">
+            Tools: {option.tools.join(", ")}
+          </div>
+        )}
+        <div className="text-[10px] text-muted-foreground/70 font-mono truncate w-full">
+          {option.path}
+        </div>
+      </div>
+    )
+  }
+
+  // Files - just path
+  return (
+    <div className="text-xs text-muted-foreground font-mono truncate w-full">
+      {option.path}
+    </div>
+  )
+}
+
 // Memoized to prevent re-renders when parent re-renders
 export const AgentsFileMention = memo(function AgentsFileMention({
   isOpen,
@@ -487,24 +580,27 @@ export const AgentsFileMention = memo(function AgentsFileMention({
   branch,
   projectPath,
   changedFiles = [],
+  showingFilesList = false,
+  showingSkillsList = false,
+  showingAgentsList = false,
 }: AgentsFileMentionProps) {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const placementRef = useRef<"above" | "below" | null>(null)
   const [debouncedSearchText, setDebouncedSearchText] = useState(searchText)
 
-  // Tooltip state
-  const [tooltipVisible, setTooltipVisible] = useState(false)
-  const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 })
-  const [tooltipContent, setTooltipContent] = useState("")
-  const [tooltipType, setTooltipType] = useState<"file" | "folder" | "skill">("file")
-  const [tooltipPlacement, setTooltipPlacement] = useState<"left" | "right">("left")
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
 
   // Fetch skills from filesystem (cached for 5 minutes)
   const { data: skills = [], isFetching: isFetchingSkills } = trpc.skills.listEnabled.useQuery(undefined, {
     enabled: isOpen,
     staleTime: 5 * 60 * 1000, // 5 minutes - skills don't change frequently
+  })
+
+  // Fetch custom agents from filesystem (cached for 5 minutes)
+  const { data: customAgents = [], isFetching: isFetchingAgents } = trpc.agents.listEnabled.useQuery(undefined, {
+    enabled: isOpen,
+    staleTime: 5 * 60 * 1000, // 5 minutes - agents don't change frequently
   })
 
   // Debounce search text (300ms to match canvas implementation)
@@ -604,51 +700,127 @@ export const AgentsFileMention = memo(function AgentsFileMention({
   // Convert skills to mention options
   const skillOptions: FileMentionOption[] = useMemo(() => {
     const searchLower = debouncedSearchText.toLowerCase()
-    
+
     return skills
-      .filter(skill => 
-        !searchLower || 
+      .filter(skill =>
+        !searchLower ||
         skill.name.toLowerCase().includes(searchLower) ||
         skill.description.toLowerCase().includes(searchLower)
       )
       .map(skill => ({
         id: `${MENTION_PREFIXES.SKILL}${skill.name}`,
         label: skill.name,
-        path: skill.description,
+        path: skill.path, // file path for tooltip
         repository: "",
         truncatedPath: skill.description,
         type: "skill" as const,
+        // Extended data for rich tooltip
+        description: skill.description,
+        source: skill.source,
       }))
   }, [skills, debouncedSearchText])
 
+  // Convert custom agents to mention options
+  const agentOptions: FileMentionOption[] = useMemo(() => {
+    const searchLower = debouncedSearchText.toLowerCase()
+
+    return customAgents
+      .filter(agent =>
+        !searchLower ||
+        agent.name.toLowerCase().includes(searchLower) ||
+        agent.description.toLowerCase().includes(searchLower)
+      )
+      .map(agent => ({
+        id: `${MENTION_PREFIXES.AGENT}${agent.name}`,
+        label: agent.name,
+        path: agent.path, // file path for tooltip
+        repository: "",
+        truncatedPath: agent.description,
+        type: "agent" as const,
+        // Extended data for rich tooltip
+        description: agent.description,
+        tools: agent.tools,
+        model: agent.model,
+        source: agent.source,
+      }))
+  }, [customAgents, debouncedSearchText])
+
+  // Check if we have skills or agents
+  const hasSkills = skillOptions.length > 0
+  const hasAgents = agentOptions.length > 0
+  const hasOnlyFiles = !hasSkills && !hasAgents
+
+  // Determine if we're in a subpage view (or showing files directly when no skills/agents)
+  const isInSubpage = showingFilesList || showingSkillsList || showingAgentsList || hasOnlyFiles
+
+  // Filter category options based on available data
+  const availableCategoryOptions = useMemo(() => {
+    return CATEGORY_OPTIONS.filter(category => {
+      if (category.id === "files") return true // Always show files
+      if (category.id === "skills") return hasSkills
+      if (category.id === "agents") return hasAgents
+      return true
+    })
+  }, [hasSkills, hasAgents])
+
   // Combined options for keyboard navigation
-  // When searching: merge all and sort globally (filename matches first)
-  // When not searching: keep groups separate (skills first, then changed files, then repo files)
+  // Subpage views show only that category's items
+  // Root view shows changed files + category navigation options
+  // Search filters globally in root view, within category in subpage
+  // If no skills or agents, skip root view and show files directly
   const options: FileMentionOption[] = useMemo(() => {
+    // SUBPAGE: Files (or if no skills/agents, show files directly)
+    if (showingFilesList || hasOnlyFiles) {
+      const allFiles = [...changedFileOptions, ...repoFileOptions]
+      if (debouncedSearchText) {
+        return sortFilesByRelevance(allFiles, debouncedSearchText)
+      }
+      return allFiles
+    }
+
+    // SUBPAGE: Skills
+    if (showingSkillsList) {
+      return skillOptions // already filtered by search in skillOptions memo
+    }
+
+    // SUBPAGE: Agents
+    if (showingAgentsList) {
+      return agentOptions // already filtered by search in agentOptions memo
+    }
+
+    // ROOT VIEW
     if (debouncedSearchText) {
-      // When searching: merge all files and skills, sort globally
-      const allItems = [...skillOptions, ...changedFileOptions, ...repoFileOptions]
+      // Global search: search across changed files + categories + skills + agents + repo files
+      const searchLower = debouncedSearchText.toLowerCase()
+      const filteredCategories = availableCategoryOptions.filter(c =>
+        c.label.toLowerCase().includes(searchLower)
+      )
+      const allItems = [...changedFileOptions, ...filteredCategories, ...skillOptions, ...agentOptions, ...repoFileOptions]
       return sortFilesByRelevance(allItems, debouncedSearchText)
     }
 
-    // No search: keep groups (skills first, then changed files, then repo files)
-    return [...skillOptions, ...changedFileOptions, ...repoFileOptions]
-  }, [skillOptions, changedFileOptions, repoFileOptions, debouncedSearchText])
-
-  // Flag to determine if we're in search mode (no groups)
-  const isSearchMode = debouncedSearchText.length > 0
+    // No search: Changed files FIRST (quick access), then category navigation
+    return [...changedFileOptions, ...availableCategoryOptions]
+  }, [showingFilesList, showingSkillsList, showingAgentsList, debouncedSearchText, changedFileOptions, repoFileOptions, skillOptions, agentOptions, hasOnlyFiles, availableCategoryOptions])
 
   // Track previous values for smarter selection reset
   const prevIsOpenRef = useRef(isOpen)
   const prevSearchRef = useRef(debouncedSearchText)
+  const prevShowingFilesListRef = useRef(showingFilesList)
+  const prevShowingSkillsListRef = useRef(showingSkillsList)
+  const prevShowingAgentsListRef = useRef(showingAgentsList)
 
   // CONSOLIDATED: Single useLayoutEffect for selection management (was 3 separate)
   useLayoutEffect(() => {
     const didJustOpen = isOpen && !prevIsOpenRef.current
     const didSearchChange = debouncedSearchText !== prevSearchRef.current
+    const didSubpageChange =
+      showingFilesList !== prevShowingFilesListRef.current ||
+      showingSkillsList !== prevShowingSkillsListRef.current ||
+      showingAgentsList !== prevShowingAgentsListRef.current
 
-    // Reset to 0 when opening or search changes
-    if (didJustOpen || didSearchChange) {
+    // Reset to 0 when opening, search changes, or subpage changes
+    if (didJustOpen || didSearchChange || didSubpageChange) {
       setSelectedIndex(0)
     }
     // Clamp to valid range if options shrunk
@@ -659,75 +831,17 @@ export const AgentsFileMention = memo(function AgentsFileMention({
     // Update refs
     prevIsOpenRef.current = isOpen
     prevSearchRef.current = debouncedSearchText
-  }, [isOpen, debouncedSearchText, options.length, selectedIndex])
+    prevShowingFilesListRef.current = showingFilesList
+    prevShowingSkillsListRef.current = showingSkillsList
+    prevShowingAgentsListRef.current = showingAgentsList
+  }, [isOpen, debouncedSearchText, options.length, selectedIndex, showingFilesList, showingSkillsList, showingAgentsList])
 
   // Reset placement when closed
   useEffect(() => {
     if (!isOpen) {
       placementRef.current = null
-      setTooltipVisible(false)
     }
   }, [isOpen])
-
-  // Update tooltip when selected/hovered item changes
-  // OPTIMIZED: Use requestAnimationFrame to batch DOM reads and prevent layout thrashing
-  useEffect(() => {
-    if (!isOpen) return
-
-    const activeIndex = hoverIndex ?? selectedIndex
-    const activeOption = options[activeIndex]
-
-    if (!activeOption?.path || !dropdownRef.current) {
-      setTooltipVisible(false)
-      return
-    }
-
-    // Use rAF to batch DOM reads and avoid layout thrashing
-    const rafId = requestAnimationFrame(() => {
-      if (!dropdownRef.current) return
-
-      const elements = dropdownRef.current.querySelectorAll(
-        "[data-option-index]",
-      )
-      const selectedElement = elements[activeIndex] as HTMLElement
-
-      if (selectedElement) {
-        const rect = selectedElement.getBoundingClientRect()
-        const dropdownRect = dropdownRef.current.getBoundingClientRect()
-
-        // Estimate tooltip width (rough calculation based on content)
-        // ~6px per character for monospace font at 10px + 16px padding
-        const estimatedTooltipWidth = Math.min(
-          activeOption.path.length * 6 + 16,
-          320, // max-w-xs = 320px
-        )
-
-        // Check if tooltip fits on the left
-        const spaceOnLeft = dropdownRect.left - 8 // 8px gap
-        const fitsOnLeft = spaceOnLeft >= estimatedTooltipWidth
-
-        if (fitsOnLeft) {
-          setTooltipPlacement("left")
-          setTooltipPosition({
-            top: rect.top,
-            left: dropdownRect.left - 4,
-          })
-        } else {
-          setTooltipPlacement("right")
-          setTooltipPosition({
-            top: rect.top,
-            left: dropdownRect.right + 4,
-          })
-        }
-
-        setTooltipContent(activeOption.path)
-        setTooltipType(activeOption.type || "file")
-        setTooltipVisible(true)
-      }
-    })
-
-    return () => cancelAnimationFrame(rafId)
-  }, [selectedIndex, hoverIndex, options, isOpen])
 
   // Keyboard navigation
   useEffect(() => {
@@ -810,7 +924,13 @@ export const AgentsFileMention = memo(function AgentsFileMention({
   if (!isOpen) return null
 
   // Calculate dropdown dimensions (matching canvas style)
-  const dropdownWidth = 320
+  // Narrower dropdown when showing only categories (no changed files)
+  const hasChangedFiles = changedFileOptions.length > 0
+  const isRootView = !showingFilesList && !showingSkillsList && !showingAgentsList && !hasOnlyFiles
+  // Narrow dropdown for root view (categories only) and skills/agents subpages
+  // Wide dropdown for files (showingFilesList or hasOnlyFiles)
+  const useNarrowWidth = (isRootView && !hasChangedFiles && !debouncedSearchText) || showingSkillsList || showingAgentsList
+  const dropdownWidth = useNarrowWidth ? 200 : 320
   const itemHeight = 28
   const headerHeight = 24
   const requestedHeight = Math.min(
@@ -866,7 +986,7 @@ export const AgentsFileMention = memo(function AgentsFileMention({
   const transformY = placeAbove ? "translateY(-100%)" : "translateY(0)"
 
   return (
-    <>
+    <TooltipProvider delayDuration={300}>
       <div
         ref={dropdownRef}
         className="fixed z-[99999] overflow-hidden rounded-[10px] border border-border bg-popover py-1 text-xs text-popover-foreground shadow-lg dark"
@@ -906,21 +1026,30 @@ export const AgentsFileMention = memo(function AgentsFileMention({
         {/* File list */}
         {!isLoading && !error && options.length > 0 && (
           <>
-            {/* Search mode: flat list sorted by relevance */}
-            {isSearchMode ? (
-              <>
-                <div className="px-2.5 py-1.5 mx-1 text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                  <span>Files & Folders</span>
-                  {isFetching && !isLoading && (
-                    <IconSpinner className="h-2.5 w-2.5" />
-                  )}
-                </div>
+            {/* Flat list sorted by relevance */}
+            <>
+              {/* Header - only show in subpages or when searching, not in root view */}
+                {(isInSubpage || debouncedSearchText) && (
+                  <div className="px-2.5 py-1.5 mx-1 text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                    <span>
+                      {(showingFilesList || hasOnlyFiles) ? "Files & Folders" :
+                       showingSkillsList ? "Skills" :
+                       showingAgentsList ? "Agents" :
+                       "Results"}
+                    </span>
+                    {isFetching && !isLoading && (
+                      <IconSpinner className="h-2.5 w-2.5" />
+                    )}
+                  </div>
+                )}
                 {options.map((option, index) => {
                   const isSelected = selectedIndex === index
                   const OptionIcon = getOptionIcon(option)
-                  return (
+                  const isCategory = option.type === "category"
+                  const showTooltip = !isCategory && option.path
+
+                  const itemContent = (
                     <div
-                      key={option.id}
                       data-option-index={index}
                       onClick={() => onSelect(option)}
                       onMouseEnter={() => {
@@ -941,7 +1070,7 @@ export const AgentsFileMention = memo(function AgentsFileMention({
                     >
                       <OptionIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
                       <span className="flex items-center gap-1 w-full min-w-0">
-                        <span className="shrink-0 whitespace-nowrap">
+                        <span className={cn("shrink-0 whitespace-nowrap", isCategory && "font-medium")}>
                           {option.label}
                         </span>
                         {/* Diff stats for changed files */}
@@ -959,7 +1088,8 @@ export const AgentsFileMention = memo(function AgentsFileMention({
                             ) : null}
                           </span>
                         )}
-                        {option.truncatedPath && (
+                        {/* Show truncated path for files only, not for skills/agents (they show in tooltip) */}
+                        {option.truncatedPath && !isCategory && option.type !== "skill" && option.type !== "agent" && (
                           <span
                             className="text-muted-foreground flex-1 min-w-0 ml-2 font-mono overflow-hidden text-[10px]"
                             style={{
@@ -974,227 +1104,40 @@ export const AgentsFileMention = memo(function AgentsFileMention({
                           </span>
                         )}
                       </span>
-                    </div>
-                  )
-                })}
-              </>
-            ) : (
-              /* Browse mode: show groups */
-              <>
-                {/* Skills group */}
-                {skillOptions.length > 0 && (
-                  <>
-                    <div className="px-2.5 py-1.5 mx-1 text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                      <span>Skills</span>
-                      {isFetchingSkills && <IconSpinner className="h-2.5 w-2.5" />}
-                    </div>
-                    {skillOptions.map((option, skillIndex) => {
-                      const index = skillIndex
-                      const isSelected = selectedIndex === index
-                      return (
-                        <div
-                          key={option.id}
-                          data-option-index={index}
-                          onClick={() => onSelect(option)}
-                          onMouseEnter={() => {
-                            setHoverIndex(index)
-                            setSelectedIndex(index)
-                          }}
-                          onMouseLeave={() => {
-                            setHoverIndex((prev) =>
-                              prev === index ? null : prev,
-                            )
-                          }}
-                          className={cn(
-                            "group inline-flex w-[calc(100%-8px)] mx-1 items-center whitespace-nowrap outline-none",
-                            "h-7 px-1.5 justify-start text-xs rounded-md",
-                            "transition-colors cursor-pointer select-none gap-1.5",
-                            isSelected
-                              ? "dark:bg-neutral-800 bg-accent text-foreground"
-                              : "text-muted-foreground dark:hover:bg-neutral-800 hover:bg-accent hover:text-foreground",
-                          )}
-                        >
-                          <SkillIcon className="h-3 w-3 flex-shrink-0" />
-                          <span className="flex items-center gap-1 w-full min-w-0">
-                            <span className="shrink-0 whitespace-nowrap font-medium">
-                              {option.label}
-                            </span>
-                            {option.truncatedPath && (
-                              <span
-                                className="text-muted-foreground flex-1 min-w-0 ml-2 overflow-hidden text-[10px] truncate"
-                              >
-                                {option.truncatedPath}
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </>
-                )}
-
-                {/* Changed files group */}
-                {changedFileOptions.length > 0 && (
-                  <>
-                    <div className="px-2.5 py-1.5 mx-1 text-xs font-medium text-muted-foreground">
-                      Changed in this chat
-                    </div>
-                    {changedFileOptions.map((option, changedIdx) => {
-                      const index = skillOptions.length + changedIdx
-                      const isSelected = selectedIndex === index
-                      const OptionIcon = getOptionIcon(option)
-                      return (
-                        <div
-                          key={option.id}
-                          data-option-index={index}
-                          onClick={() => onSelect(option)}
-                          onMouseEnter={() => {
-                            setHoverIndex(index)
-                            setSelectedIndex(index)
-                          }}
-                          onMouseLeave={() => {
-                            setHoverIndex((prev) =>
-                              prev === index ? null : prev,
-                            )
-                          }}
-                          className={cn(
-                            "group inline-flex w-[calc(100%-8px)] mx-1 items-center whitespace-nowrap outline-none",
-                            "h-7 px-1.5 justify-start text-xs rounded-md",
-                            "transition-colors cursor-pointer select-none gap-1.5",
-                            isSelected
-                              ? "dark:bg-neutral-800 bg-accent text-foreground"
-                              : "text-muted-foreground dark:hover:bg-neutral-800 hover:bg-accent hover:text-foreground",
-                          )}
-                        >
-                          <OptionIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                          <span className="flex items-center gap-1 w-full min-w-0">
-                            <span className="shrink-0 whitespace-nowrap">
-                              {option.label}
-                            </span>
-                            {(option.additions || option.deletions) && (
-                              <span className="shrink-0 flex items-center gap-1 text-[10px] font-mono">
-                                {option.additions ? (
-                                  <span className="text-green-500">
-                                    +{option.additions}
-                                  </span>
-                                ) : null}
-                                {option.deletions ? (
-                                  <span className="text-red-500">
-                                    -{option.deletions}
-                                  </span>
-                                ) : null}
-                              </span>
-                            )}
-                            {option.truncatedPath && (
-                              <span
-                                className="text-muted-foreground flex-1 min-w-0 ml-2 font-mono overflow-hidden text-[10px]"
-                                style={{
-                                  direction: "rtl",
-                                  textAlign: "left",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                <span style={{ direction: "ltr" }}>
-                                  {option.truncatedPath}
-                                </span>
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </>
-                )}
-
-                {/* Repo files group */}
-                {repoFileOptions.length > 0 && (
-                  <>
-                    <div className="px-2.5 py-1.5 mx-1 text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-                      <span>Files & Folders</span>
-                      {isFetching && !isLoading && (
-                        <IconSpinner className="h-2.5 w-2.5" />
+                      {/* ChevronRight for category items (navigate to subpage) */}
+                      {isCategory && (
+                        <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                       )}
                     </div>
-                    {repoFileOptions.map((option, repoIndex) => {
-                      const index = skillOptions.length + changedFileOptions.length + repoIndex
-                      const isSelected = selectedIndex === index
-                      const OptionIcon = getOptionIcon(option)
-                      return (
-                        <div
-                          key={option.id}
-                          data-option-index={index}
-                          onClick={() => onSelect(option)}
-                          onMouseEnter={() => {
-                            setHoverIndex(index)
-                            setSelectedIndex(index)
-                          }}
-                          onMouseLeave={() => {
-                            setHoverIndex((prev) =>
-                              prev === index ? null : prev,
-                            )
-                          }}
-                          className={cn(
-                            "group inline-flex w-[calc(100%-8px)] mx-1 items-center whitespace-nowrap outline-none",
-                            "h-7 px-1.5 justify-start text-xs rounded-md",
-                            "transition-colors cursor-pointer select-none gap-1.5",
-                            isSelected
-                              ? "dark:bg-neutral-800 bg-accent text-foreground"
-                              : "text-muted-foreground dark:hover:bg-neutral-800 hover:bg-accent hover:text-foreground",
-                          )}
+                  )
+
+                  if (showTooltip) {
+                    return (
+                      <Tooltip key={option.id} open={isSelected}>
+                        <TooltipTrigger asChild>
+                          {itemContent}
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="left"
+                          align="start"
+                          sideOffset={8}
+                          collisionPadding={16}
+                          avoidCollisions
+                          className="overflow-hidden"
                         >
-                          <OptionIcon className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                          <span className="flex items-center gap-1 w-full min-w-0">
-                            <span className="shrink-0 whitespace-nowrap">
-                              {option.label}
-                            </span>
-                            {option.truncatedPath && (
-                              <span
-                                className="text-muted-foreground flex-1 min-w-0 ml-2 font-mono overflow-hidden text-[10px]"
-                                style={{
-                                  direction: "rtl",
-                                  textAlign: "left",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                <span style={{ direction: "ltr" }}>
-                                  {option.truncatedPath}
-                                </span>
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </>
-                )}
+                          {renderTooltipContent(option)}
+                        </TooltipContent>
+                      </Tooltip>
+                    )
+                  }
+
+                  return <div key={option.id}>{itemContent}</div>
+                })}
               </>
-            )}
           </>
         )}
       </div>
-
-      {/* Tooltip for full path (tree view for folders) */}
-      {tooltipVisible && tooltipContent && (
-        <div
-          className={cn(
-            "fixed z-[100000] bg-popover border border-border rounded-lg shadow-lg dark",
-            tooltipType === "folder" ? "px-3 py-2" : "px-2 py-1 max-w-xs"
-          )}
-          style={{
-            top: tooltipPosition.top,
-            left: tooltipPosition.left,
-            transform: tooltipPlacement === "left" ? "translateX(-100%)" : "translateX(0)",
-          }}
-        >
-          {tooltipType === "folder" ? (
-            renderFolderTree(tooltipContent)
-          ) : (
-            <div className="text-foreground/90 font-mono text-[10px] truncate whitespace-nowrap">
-              {tooltipContent}
-            </div>
-          )}
-        </div>
-      )}
-    </>
+    </TooltipProvider>
   )
 })
+

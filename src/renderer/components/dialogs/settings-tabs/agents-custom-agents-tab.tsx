@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react"
 import { motion, AnimatePresence } from "motion/react"
 import { trpc } from "../../../lib/trpc"
 import { cn } from "../../../lib/utils"
-import { SkillIcon } from "../../ui/icons"
+import { AgentIcon } from "../../ui/icons"
 
 // Hook to detect narrow screen
 function useIsNarrowScreen(): boolean {
@@ -22,18 +22,30 @@ function useIsNarrowScreen(): boolean {
   return isNarrow
 }
 
-export function AgentsSkillsTab() {
-  const isNarrowScreen = useIsNarrowScreen()
-  const [expandedSkillName, setExpandedSkillName] = useState<string | null>(null)
+interface FileAgent {
+  name: string
+  description: string
+  prompt: string
+  tools?: string[]
+  disallowedTools?: string[]
+  model?: "sonnet" | "opus" | "haiku" | "inherit"
+  source: "user" | "project"
+  path: string
+}
 
-  const { data: skills = [], isLoading } = trpc.skills.list.useQuery(undefined)
+export function AgentsCustomAgentsTab() {
+  const isNarrowScreen = useIsNarrowScreen()
+  const [expandedAgentName, setExpandedAgentName] = useState<string | null>(null)
+
+  const { data: agents = [], isLoading } = trpc.agents.list.useQuery(undefined)
+
   const openInFinderMutation = trpc.external.openInFinder.useMutation()
 
-  const userSkills = skills.filter((s) => s.source === "user")
-  const projectSkills = skills.filter((s) => s.source === "project")
+  const userAgents = agents.filter((a) => a.source === "user")
+  const projectAgents = agents.filter((a) => a.source === "project")
 
-  const handleExpandSkill = (skillName: string) => {
-    setExpandedSkillName(expandedSkillName === skillName ? null : skillName)
+  const handleExpandAgent = (agentName: string) => {
+    setExpandedAgentName(expandedAgentName === agentName ? null : agentName)
   }
 
   const handleOpenInFinder = (path: string) => {
@@ -46,13 +58,13 @@ export function AgentsSkillsTab() {
       {!isNarrowScreen && (
         <div className="flex flex-col space-y-1.5 text-center sm:text-left">
           <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-foreground">Skills</h3>
+            <h3 className="text-sm font-semibold text-foreground">Custom Agents</h3>
             <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-muted text-muted-foreground">
               Beta
             </span>
           </div>
           <a
-            href="https://code.claude.com/docs/en/skills"
+            href="https://code.claude.com/docs/en/sub-agents"
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-muted-foreground hover:text-foreground underline transition-colors"
@@ -62,39 +74,39 @@ export function AgentsSkillsTab() {
         </div>
       )}
 
-      {/* Skills List */}
+      {/* Agents List */}
       <div className="space-y-4">
         {isLoading ? (
           <div className="bg-background rounded-lg border border-border p-4 text-sm text-muted-foreground text-center">
-            Loading skills...
+            Loading agents...
           </div>
-        ) : skills.length === 0 ? (
+        ) : agents.length === 0 ? (
           <div className="bg-background rounded-lg border border-border p-6 text-center">
-            <SkillIcon className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />
+            <AgentIcon className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />
             <p className="text-sm text-muted-foreground mb-2">
-              No skills found
+              No custom agents found
             </p>
             <p className="text-xs text-muted-foreground">
-              Add skills to <code className="px-1 py-0.5 bg-muted rounded">~/.claude/skills/</code> or <code className="px-1 py-0.5 bg-muted rounded">.claude/skills/</code>
+              Add .md files to <code className="px-1 py-0.5 bg-muted rounded">~/.claude/agents/</code>
             </p>
           </div>
         ) : (
           <>
-            {/* User Skills */}
-            {userSkills.length > 0 && (
+            {/* User Agents */}
+            {userAgents.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs text-muted-foreground">
-                  ~/.claude/skills/
+                  ~/.claude/agents/
                 </div>
                 <div className="bg-background rounded-lg border border-border overflow-hidden">
                   <div className="divide-y divide-border">
-                    {userSkills.map((skill) => (
-                      <SkillRow
-                        key={skill.name}
-                        skill={skill}
-                        isExpanded={expandedSkillName === skill.name}
-                        onToggle={() => handleExpandSkill(skill.name)}
-                        onOpenInFinder={() => handleOpenInFinder(skill.path)}
+                    {userAgents.map((agent) => (
+                      <AgentRow
+                        key={agent.name}
+                        agent={agent}
+                        isExpanded={expandedAgentName === agent.name}
+                        onToggle={() => handleExpandAgent(agent.name)}
+                        onOpenInFinder={() => handleOpenInFinder(agent.path)}
                       />
                     ))}
                   </div>
@@ -102,21 +114,21 @@ export function AgentsSkillsTab() {
               </div>
             )}
 
-            {/* Project Skills */}
-            {projectSkills.length > 0 && (
+            {/* Project Agents */}
+            {projectAgents.length > 0 && (
               <div className="space-y-2">
                 <div className="text-xs text-muted-foreground">
-                  .claude/skills/
+                  .claude/agents/
                 </div>
                 <div className="bg-background rounded-lg border border-border overflow-hidden">
                   <div className="divide-y divide-border">
-                    {projectSkills.map((skill) => (
-                      <SkillRow
-                        key={skill.name}
-                        skill={skill}
-                        isExpanded={expandedSkillName === skill.name}
-                        onToggle={() => handleExpandSkill(skill.name)}
-                        onOpenInFinder={() => handleOpenInFinder(skill.path)}
+                    {projectAgents.map((agent) => (
+                      <AgentRow
+                        key={agent.name}
+                        agent={agent}
+                        isExpanded={expandedAgentName === agent.name}
+                        onToggle={() => handleExpandAgent(agent.name)}
+                        onOpenInFinder={() => handleOpenInFinder(agent.path)}
                       />
                     ))}
                   </div>
@@ -131,32 +143,41 @@ export function AgentsSkillsTab() {
       <div className="pt-4 border-t border-border space-y-3">
         <div>
           <h4 className="text-xs font-medium text-foreground mb-1.5">
-            How to use Skills
+            How Custom Agents Work
           </h4>
           <p className="text-xs text-muted-foreground">
-            Mention a skill in chat with <code className="px-1 py-0.5 bg-muted rounded">@skill-name</code> or ask Claude to use it directly.
+            Agents are specialized sub-agents that Claude can invoke via the Task tool. They have their own system prompt, tools, and model settings.
           </p>
         </div>
         <div>
           <h4 className="text-xs font-medium text-foreground mb-1.5">
-            Creating Skills
+            Using Agents
           </h4>
           <p className="text-xs text-muted-foreground">
-            Create a folder with a <code className="px-1 py-0.5 bg-muted rounded">SKILL.md</code> file in <code className="px-1 py-0.5 bg-muted rounded">~/.claude/skills/your-skill/</code>
+            Ask Claude to use an agent directly (e.g., "use the code-reviewer agent") or Claude will automatically invoke them when appropriate.
+          </p>
+        </div>
+        <div>
+          <h4 className="text-xs font-medium text-foreground mb-1.5">
+            File Format
+          </h4>
+          <p className="text-xs text-muted-foreground">
+            Agents are Markdown files with YAML frontmatter containing <code className="px-1 py-0.5 bg-muted rounded">name</code>, <code className="px-1 py-0.5 bg-muted rounded">description</code>, <code className="px-1 py-0.5 bg-muted rounded">tools</code>, and <code className="px-1 py-0.5 bg-muted rounded">model</code>. The body is the system prompt.
           </p>
         </div>
       </div>
+
     </div>
   )
 }
 
-function SkillRow({
-  skill,
+function AgentRow({
+  agent,
   isExpanded,
   onToggle,
   onOpenInFinder,
 }: {
-  skill: { name: string; description: string; source: "user" | "project"; path: string }
+  agent: FileAgent
   isExpanded: boolean
   onToggle: () => void
   onOpenInFinder: () => void
@@ -175,14 +196,19 @@ function SkillRow({
         />
         <div className="flex flex-col space-y-0.5 min-w-0 flex-1">
           <span className="text-sm font-medium text-foreground truncate">
-            {skill.name}
+            {agent.name}
           </span>
-          {skill.description && (
+          {agent.description && (
             <span className="text-xs text-muted-foreground truncate">
-              {skill.description}
+              {agent.description}
             </span>
           )}
         </div>
+        {agent.model && agent.model !== "inherit" && (
+          <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-muted text-muted-foreground flex-shrink-0">
+            {agent.model}
+          </span>
+        )}
       </button>
 
       <AnimatePresence initial={false}>
@@ -198,7 +224,8 @@ function SkillRow({
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 pt-0 border-t border-border bg-muted/20">
-              <div className="pt-3 space-y-2">
+              <div className="pt-3 space-y-3">
+                {/* Path - clickable to open in Finder */}
                 <div>
                   <span className="text-xs font-medium text-foreground">Path</span>
                   <button
@@ -208,15 +235,43 @@ function SkillRow({
                     }}
                     className="block text-xs text-muted-foreground font-mono mt-0.5 break-all text-left hover:text-foreground hover:underline transition-colors cursor-pointer"
                   >
-                    {skill.path}
+                    {agent.path}
                   </button>
                 </div>
-                <div>
-                  <span className="text-xs font-medium text-foreground">Usage</span>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Type <code className="px-1 py-0.5 bg-muted rounded">@{skill.name}</code> in chat or ask Claude to use the {skill.name} skill.
-                  </p>
-                </div>
+
+                {/* Tools */}
+                {agent.tools && agent.tools.length > 0 && (
+                  <div>
+                    <span className="text-xs font-medium text-foreground">Allowed Tools</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {agent.tools.map((tool) => (
+                        <span
+                          key={tool}
+                          className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-muted text-muted-foreground"
+                        >
+                          {tool}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Disallowed Tools */}
+                {agent.disallowedTools && agent.disallowedTools.length > 0 && (
+                  <div>
+                    <span className="text-xs font-medium text-foreground">Disallowed Tools</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {agent.disallowedTools.map((tool) => (
+                        <span
+                          key={tool}
+                          className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-muted text-muted-foreground"
+                        >
+                          {tool}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>

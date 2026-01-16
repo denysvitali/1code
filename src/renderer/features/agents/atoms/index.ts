@@ -449,3 +449,7 @@ export type PendingUserQuestions = {
   }>
 }
 export const pendingUserQuestionsAtom = atom<PendingUserQuestions | null>(null)
+
+// Store AskUserQuestion results by toolUseId for real-time updates
+// Map<toolUseId, result>
+export const askUserQuestionResultsAtom = atom<Map<string, unknown>>(new Map())

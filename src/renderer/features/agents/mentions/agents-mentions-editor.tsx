@@ -20,7 +20,12 @@ export interface FileMentionOption {
   truncatedPath?: string // directory path for inline display or skill description
   additions?: number // for changed files
   deletions?: number // for changed files
-  type?: "file" | "folder" | "skill" // entry type (default: file)
+  type?: "file" | "folder" | "skill" | "agent" | "category" // entry type (default: file)
+  // Extended data for rich tooltips (skills/agents)
+  description?: string // skill/agent description
+  tools?: string[] // agent allowed tools
+  model?: string // agent model
+  source?: "user" | "project" // skill/agent source
 }
 
 // Mention ID prefixes
@@ -28,6 +33,7 @@ export const MENTION_PREFIXES = {
   FILE: "file:",
   FOLDER: "folder:",
   SKILL: "skill:",
+  AGENT: "agent:",
 } as const
 
 type TriggerPayload = {
