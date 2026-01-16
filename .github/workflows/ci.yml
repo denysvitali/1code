@@ -1,0 +1,164 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: [v*]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+
+      - name: Package Linux
+        run: bun run package:linux
+
+      - name: Upload Linux artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: release/*
+          retention-days: 7
+
+  build-mac:
+    name: Build macOS
+    runs-on: macos-arm64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+
+      - name: Package macOS
+        run: bun run package:mac
+
+      - name: Upload macOS artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-artifacts
+          path: release/*
+          retention-days: 7
+
+  build-win:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build
+        run: bun run build
+
+      - name: Package Windows
+        run: bun run package:win
+
+      - name: Upload Windows artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: win-artifacts
+          path: release/*
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: [build-linux, build-mac, build-win]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-artifacts
+          path: release/linux
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-artifacts
+          path: release/mac
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: win-artifacts
+          path: release/win
+
+      - name: Merge artifacts
+        run: |
+          cp release/linux/* release/ 2>/dev/null || true
+          cp release/mac/* release/ 2>/dev/null || true
+          cp release/win/* release/ 2>/dev/null || true
+          rm -rf release/linux release/mac release/win
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          draft: false
+          prerelease: false
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## Assets
+
+            Download the latest release for your platform:
+
+            ### macOS
+            - `Agents-*.dmg` - Installer (drag & drop)
+            - `Agents-*.zip` - Auto-update zip
+
+            ### Windows
+            - `Agents-*.exe` - Installer (NSIS)
+            - `Agents-*.portable.exe` - Portable (no install)
+
+            ### Linux
+            - `Agents-*.AppImage` - AppImage (executable)
+            - `Agents-*.deb` - Debian package
+
+            See [CHANGELOG.md](./CHANGELOG.md) for details.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
