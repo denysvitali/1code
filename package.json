@@ -3,7 +3,7 @@
   "version": "0.0.14",
   "private": true,
   "description": "1Code - UI for parallel work with AI agents",
-  "author": "21st.dev",
+  "author": "21st.dev <noreply@21st.dev>",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
